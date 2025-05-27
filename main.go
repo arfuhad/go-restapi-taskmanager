@@ -2,6 +2,7 @@ package main
 
 import (
 	"taskapi/handlers"
+	"taskapi/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,7 +16,7 @@ func main() {
 	// Inject DB into handlers
 	handlers.SetDB(DB)
 
-	r.POST("/tasks", handlers.CreateTask)
+	r.POST("/tasks", middleware.ValidateTaskInput(), handlers.CreateTask)
 	r.GET("/tasks", handlers.GetTasks)
 	r.GET("/tasks/:id", handlers.GetTaskById)
 	r.PUT("/tasks/:id/done", handlers.MarkTaskDone)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,16 +20,29 @@ func SetDB(db *sql.DB) {
 
 // POST /tasks
 func CreateTask(c *gin.Context) {
-	var task models.Task
-	if err := c.BindJSON(&task); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+	// var task models.Task
+	// if err := c.BindJSON(&task); err != nil {
+	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+	// 	return
+	// }
+
+	// if strings.TrimSpace(task.Title) == "" {
+	// 	c.JSON(http.StatusBadRequest, gin.H{"error": "Title is required"})
+	// 	return
+	// }
+	taskVal, exists := c.Get("task")
+	if !exists {
+		fmt.Printf("CreateTask Validation failed")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed"})
 		return
 	}
+	task := taskVal.(models.Task)
 
 	now := time.Now()
 	res, err := DB.Exec(`INSERT INTO tasks (title, completed, created_at, updated_at, priority, due_date, tags) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		task.Title, false, now, now, task.Priority, task.DueDate, task.Tags)
 	if err != nil {
+		fmt.Printf("CreateTask Query failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task"})
 		return
 	}
@@ -44,8 +58,39 @@ func CreateTask(c *gin.Context) {
 
 // GET /tasks
 func GetTasks(c *gin.Context) {
-	rows, err := DB.Query(`SELECT id, title, completed, created_at, updated_at, priority, due_date, tags FROM tasks`)
+	query := `SELECT id, title, completed, created_at, updated_at, priority, due_date, tags FROM tasks WHERE 1=1`
+
+	var args []interface{}
+
+	// Optional filters
+	completed := c.Query("completed")
+	if completed != "" {
+		query += " AND completed = ?"
+		status := completed == "true"
+		args = append(args, status)
+	}
+
+	priority := c.Query("priority")
+	if priority != "" {
+		query += " AND priority = ?"
+		args = append(args, priority)
+	}
+
+	dueDate := c.Query("due_date")
+	if dueDate != "" {
+		query += " AND due_date <= ?"
+		args = append(args, dueDate)
+	}
+
+	tags := c.Query("tags")
+	if tags != "" {
+		query += " AND tags LIKE ?"
+		args = append(args, "%"+tags+"%")
+	}
+
+	rows, err := DB.Query(query, args...)
 	if err != nil {
+		fmt.Printf("Query failed: %v, Query: %s, Args: %v", err, query, args)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tasks"})
 		return
 	}
@@ -56,11 +101,14 @@ func GetTasks(c *gin.Context) {
 		var task models.Task
 		var created string
 		var updated string
-		if err := rows.Scan(&task.ID, &task.Title, &task.Completed, &created, &updated); err == nil {
-			task.CreatedAt, _ = time.Parse(time.RFC3339, created)
-			task.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
-			tasks = append(tasks, task)
+		err := rows.Scan(&task.ID, &task.Title, &task.Completed, &created, &updated, &task.Priority, &task.DueDate, &task.Tags)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve tasks"})
+			return
 		}
+		task.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		task.UpdatedAt, _ = time.Parse(time.RFC3339, updated)
+		tasks = append(tasks, task)
 	}
 
 	if len(tasks) == 0 {
